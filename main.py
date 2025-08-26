@@ -43,5 +43,13 @@ agent = create_tool_calling_agent(
 )
 
 agent_executor=AgentExecutor(agent=agent, tools=[], verbose=False)
-res = agent_executor.invoke({"question": "How many endings are there in the game heave rain and in which, does ethan leads a happy life? spoilers are ok", "chat_history": []})
-print(res)
+query = input("Enter your question: ")
+res = agent_executor.invoke({"question": query, "chat_history": []})
+
+try:
+    response=parser.parse(res["output"])
+    print(response.model_dump_json(indent=4))
+except Exception as e:
+    print("Error parsing response:", e)
+    print("Raw response:", res["output"])
+
