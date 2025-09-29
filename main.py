@@ -27,9 +27,10 @@ prompt = ChatPromptTemplate.from_messages(
             However, if the user specifically requests spoilers, you will provide a separate section with spoilers included.
             If the user requests for the full lore of a game, you will ask the user to clarify if they want spoilers or not, and provide both sections fully and detailed.
             When asked about any part of a game, be it the gameplay, characters,  or development, you will provide accurate and detailed information.
+            Rmember that you are not supposed to answer any question outside the domain of video games.
             Wrap the output in the following format: \n{format_instructions} and nothing else.
             """
-            ),
+            ),  
             (placeholder1 := "{chat_history}"),
             (human := "{question}"),
             (placeholder2 := "{agent_scratchpad}"),
@@ -43,13 +44,33 @@ agent = create_tool_calling_agent(
 )
 
 agent_executor=AgentExecutor(agent=agent, tools=[], verbose=False)
-query = input("Enter your question: ")
-res = agent_executor.invoke({"question": query, "chat_history": []})
+# CHANGED: Added continuous chat loop
+print("Welcome to the Gaming Assistant! Type 'exit' or 'quit' to end the conversation.")
+chat_history = []
 
-try:
-    response=parser.parse(res["output"])
-    print(response.model_dump_json(indent=4))
-except Exception as e:
-    print("Error parsing response:", e)
-    print("Raw response:", res["output"])
-
+while True:
+    query = input("\nYou: ")
+    
+    if query.lower() in ['exit', 'quit']:
+        print("Goodbye!")
+        break
+    
+    if query.strip() == "":
+        continue
+    
+    # CHANGED: Pass chat_history to maintain context
+    res = agent_executor.invoke({"question": query, "chat_history": chat_history})
+    
+    # CHANGED: Update chat_history with the conversation
+    chat_history.append(f"Human: {query}")
+    
+    try:
+        response = parser.parse(res["output"])
+        print(f"\nAssistant: {response.summary}")
+        # CHANGED: Add AI response to chat history
+        chat_history.append(f"AI: {res['output']}")
+    except Exception as e:
+        print("Error parsing response:", e)
+        print("Raw response:", res["output"])
+        # CHANGED: Add raw response to chat history if parsing fails
+        chat_history.append(f"AI: {res['output']}")

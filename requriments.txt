@@ -1,5 +1,6 @@
 langchain
-langchain-community 
+langchain-community
+langchain-community ddg-search
 langchain-openai
 langchain-anthropic
 python-dotenv
