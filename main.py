@@ -13,17 +13,17 @@ load_dotenv()
 
 class Response(BaseModel):
     summary: str
-    spoilers: str = ""  # CHANGED: Made optional with default
-    no_spoilers: str = ""  # CHANGED: Made optional with default  
-    game_tips: str = ""  # CHANGED: Added for codes/puzzles
-    lore: str = ""  # CHANGED: Added for detailed lore
-    warning: str = ""  # CHANGED: Added for spoiler warnings'
-    rawg_info: str = ""  # CHANGED: Added for rawg.io data
+    spoilers: str = "" 
+    no_spoilers: str = ""  
+    game_tips: str = ""  
+    lore: str = ""  
+    warning: str = ""  
+    rawg_info: str = ""  
 
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, verbose=False, timeout=30)
 parser = PydanticOutputParser(pydantic_object= Response)
 
-# CHANGED: RAWG.io API Tool Implementation
+# fuckass RAWG.io API integration and code
 def search_rawg_games(game_name: str) -> str:
     """Search for game information using RAWG.io API"""
     try:
@@ -74,7 +74,7 @@ def search_rawg_games(game_name: str) -> str:
     except Exception as e:
         return f"Error fetching game data: {str(e)}"
     
-    # CHANGED: Create RAWG.io tool
+    # RAWG tool definition
 rawg_tool = Tool(
     name="rawg_game_search",
     description="Search for detailed game information from RAWG.io database including release dates, ratings, playtime, descriptions, and more",
@@ -124,8 +124,8 @@ prompt = ChatPromptTemplate.from_messages(
     ]
 ).partial(format_instructions=parser.get_format_instructions())
 
-# CHANGED: Added tools to agent creation
-tools = [rawg_tool]  # CHANGED: Initialize tools list
+# CHANGED: Added tools to agent creation, just RAWG for now
+tools = [rawg_tool] 
 
 agent = create_tool_calling_agent(
     llm=llm,
@@ -135,7 +135,7 @@ agent = create_tool_calling_agent(
 
 agent_executor=AgentExecutor(agent=agent, tools=tools, verbose=True)
 # CHANGED: Added continuous chat loop
-print("Welcome to the Gaming Assistant! Type 'exit' or 'quit' to end the conversation.")
+print("Salutations, Gamer! Ask me anything about video games. Type 'exit' to quit.")
 chat_history = []
 
 while True:
@@ -160,27 +160,27 @@ while True:
         # CHANGED: Enhanced output formatting for different response types
         print(f"\n🎮 Gaming Assistant:")
 
-        if response.rawg_info:  # changed from response.rawg_data
-            print(f"📊 Real-time Data:\n{response.rawg_info}")
+        if response.rawg_info:
+            print(f"Real-time Data:\n{response.rawg_info}")
 
         
         if response.summary:
-            print(f"Summary: {response.summary}")
+            print(f"Summary: {response.summary}\n")
         
         if response.no_spoilers:
-            print(f"Spoiler-Free: {response.no_spoilers}")
+            print(f"Spoiler-Free: {response.no_spoilers}\n")
             
         if response.spoilers:
-            print(f"SPOILER ALERT: {response.spoilers}")
+            print(f"SPOILER ALERT: {response.spoilers}\n")
             
         if response.warning:
-            print(f" {response.warning}")
+            print(f" {response.warning}\n")
             
         if response.lore:
-            print(f"Lore: {response.lore}")
+            print(f"Lore: {response.lore}\n")
             
         if response.game_tips:
-            print(f"Tips/Codes: {response.game_tips}")
+            print(f"Tips/Codes: {response.game_tips}\n")
 
         # CHANGED: Add AI response to chat history
         chat_history.append(f"AI: {res['output']}")
