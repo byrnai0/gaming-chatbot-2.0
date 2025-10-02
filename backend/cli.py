@@ -1,3 +1,4 @@
+from backend.main import agent_executor, parser  # re-use your existing chatbot logic
 # CHANGED: Added continuous chat loop
 print("Salutations, Gamer! Ask me anything about video games. Type 'exit' to quit.")
 chat_history = []
