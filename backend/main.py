@@ -15,8 +15,9 @@ from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain.tools import Tool
 
 # IGDB + WIKI SERVICES
-from backend.services.igdb_service import IGDBService
+from backend.services.rawg_service import RAWGService
 from backend.services.wiki_service import WikiService
+from backend.services.hltb_service import HLTBService
 from backend.services.plot_processing import (
     detect_spoiler_intent,
     extract_spoiler_free,
@@ -88,7 +89,7 @@ class Response(BaseModel):
     game_tips: str = ""
     lore: str = ""
     warning: str = ""
-    igdb_data: str = ""      # short IGDB metadata line
+    rawg_data: str = ""      # short IGDB metadata line
     wiki_data: str = ""      # NEW: short wiki extracted text
     can_be_spoiler: bool = False # If topic is spoiler-sensitive
     topic: str = ""              # Detected topic: metadata, plot, spoilers, characters, development, lore, gameplay, tips, dlc
@@ -99,33 +100,35 @@ parser = PydanticOutputParser(pydantic_object=Response)
 
 
 # ---------------- Service Instances ----------------
-_igdb = IGDBService()
+_rawg = RAWGService()
 _wiki = WikiService()
+_hltb = HLTBService()
 
-# ---------------- IGDB TOOLS (from Stage 1) ----------------
-async def _t_release_date(game_name: str, region_hint: Optional[str] = None) -> str:
-    return await _igdb.igdb_release_date(game_name, region_hint) or "Release date not found."
+# ---------------- RAWG TOOLS (metadata short answers) ----------------
+async def _t_release_date(game_name: str) -> str:
+    return await _rawg.release_date(game_name) or "Release date not found."
+
+async def _t_countdown(game_name: str) -> str:
+    return await _rawg.countdown(game_name) or "No release date available."
 
 async def _t_developer(game_name: str) -> str:
-    return await _igdb.igdb_developer(game_name) or "Developer not found."
+    return await _rawg.developer(game_name) or "Developer not found."
 
 async def _t_platforms(game_name: str) -> str:
-    return await _igdb.igdb_platforms(game_name) or "Platforms not found."
+    return await _rawg.platforms(game_name) or "Platforms not found."
 
 async def _t_genres(game_name: str) -> str:
-    return await _igdb.igdb_genres(game_name) or "Genres not found."
+    return await _rawg.genres(game_name) or "Genres not found."
 
-async def _t_engine(game_name: str) -> str:
-    return await _igdb.igdb_engine(game_name) or "Engine not found."
+async def _t_tags(game_name: str) -> str:
+    return await _rawg.tags(game_name) or "Tags not found."
 
 async def _t_rating(game_name: str) -> str:
-    return await _igdb.igdb_rating(game_name) or "Rating not found."
-
-async def _t_countdown(game_name: str, region_hint: Optional[str] = None) -> str:
-    return await _igdb.igdb_countdown(game_name, region_hint) or "No release date available."
+    return await _rawg.rating(game_name) or "Rating not found."
 
 async def _t_summary(game_name: str) -> str:
-    return await _igdb.igdb_summary(game_name) or "Summary unavailable."
+    return await _rawg.summary(game_name) or "Summary unavailable."
+
 
 
 # ---------------- WIKIPEDIA TOOLS (NEW – Stage 2) ----------------
@@ -141,60 +144,73 @@ def _t_wiki_clean_text(text: str) -> str:
     """Clean Wiki text by stripping citations and extra formatting."""
     return _wiki.clean_wiki_text(text)
 
+# ---------------- HLTB TOOL (game length) ----------------
+async def _t_hltb_lengths(game_name: str) -> str:
+    return await _hltb.lengths(game_name) or "Length not found."
+
+
 
 # ---------------- TOOL REGISTRY ----------------
 tools = [
-    # ---- IGDB SHORT FACT TOOLS ----
+    # ---- RAWG SHORT FACT TOOLS ----
     Tool(
-        name="igdb_release_date",
-        description="Short release date. Input: game_name, optional region_hint.",
+        name="rawg_release_date",
+        description="Short release date. Input: game_name.",
         func=lambda *_, **__: "use coroutine",
-        coroutine=lambda game_name, region_hint=None: _t_release_date(game_name, region_hint),
+        coroutine=lambda game_name: _t_release_date(game_name),
     ),
     Tool(
-        name="igdb_developer",
-        description="Short primary developer name. Input: game_name.",
+        name="rawg_countdown",
+        description="Release countdown or release date. Input: game_name.",
+        func=lambda *_, **__: "use coroutine",
+        coroutine=lambda game_name: _t_countdown(game_name),
+    ),
+    Tool(
+        name="rawg_developer",
+        description="Short primary developer(s). Input: game_name.",
         func=lambda *_, **__: "use coroutine",
         coroutine=lambda game_name: _t_developer(game_name),
     ),
     Tool(
-        name="igdb_platforms",
+        name="rawg_platforms",
         description="Short comma-separated platforms. Input: game_name.",
         func=lambda *_, **__: "use coroutine",
         coroutine=lambda game_name: _t_platforms(game_name),
     ),
     Tool(
-        name="igdb_genres",
+        name="rawg_genres",
         description="Short comma-separated genres. Input: game_name.",
         func=lambda *_, **__: "use coroutine",
         coroutine=lambda game_name: _t_genres(game_name),
     ),
     Tool(
-        name="igdb_engine",
-        description="Short engine name. Input: game_name.",
+        name="rawg_tags",
+        description="Short comma-separated tags. Input: game_name.",
         func=lambda *_, **__: "use coroutine",
-        coroutine=lambda game_name: _t_engine(game_name),
+        coroutine=lambda game_name: _t_tags(game_name),
     ),
     Tool(
-        name="igdb_rating",
-        description="Short IGDB rating summary. Input: game_name.",
+        name="rawg_rating",
+        description="RAWG rating summary (RAWG/5, ratings count, Metacritic if present). Input: game_name.",
         func=lambda *_, **__: "use coroutine",
         coroutine=lambda game_name: _t_rating(game_name),
     ),
     Tool(
-        name="igdb_countdown",
-        description="Release countdown or release date. Input: game_name, optional region_hint.",
-        func=lambda *_, **__: "use coroutine",
-        coroutine=lambda game_name, region_hint=None: _t_countdown(game_name, region_hint),
-    ),
-    Tool(
-        name="igdb_summary",
-        description="Factual 2–3 line IGDB summary. Input: game_name.",
+        name="rawg_summary",
+        description="Factual 2–3 line summary from RAWG fields. Input: game_name.",
         func=lambda *_, **__: "use coroutine",
         coroutine=lambda game_name: _t_summary(game_name),
     ),
 
-    # ---- WIKIPEDIA RAW + SECTION TOOLS ----
+    # ---- HLTB GAME LENGTH ----
+    Tool(
+        name="hltb_lengths",
+        description="Game length from HowLongToBeat. Input: game_name. Returns 'Main | Main+Extras | Completionist'.",
+        func=lambda *_, **__: "use coroutine",
+        coroutine=lambda game_name: _t_hltb_lengths(game_name),
+    ),
+
+    # ---- WIKIPEDIA RAW + SECTION TOOLS (KEEP AS IS) ----
     Tool(
         name="wiki_fetch_raw",
         description=(
@@ -220,6 +236,7 @@ tools = [
 ]
 
 
+
 # ---------------- UPDATED PROMPT ----------------
 prompt = ChatPromptTemplate.from_messages(
     [
@@ -237,7 +254,7 @@ Your #1 rule: Answer ONLY what the user asked for. Keep responses short, precise
 • Examples:
   - “When was Elden Ring released?” → metadata
   - “Explain the story of Elden Ring” → plot
-  - “Spoil Elden Ring ending” → spoilers
+  - “Spoil the ending of Elden Ring” → spoilers
   - “Who are the characters in God of War 3?” → characters
   - “How was GTA V developed?” → development
   - “What's the lore of Dark Souls?” → lore
@@ -245,21 +262,23 @@ Your #1 rule: Answer ONLY what the user asked for. Keep responses short, precise
   - “List Witcher 3 DLCs” → dlc
 
 ### DATA SOURCE RULES
-• Use IGDB tools ONLY for metadata:
-  Release date, developer, platforms, genres, engine, rating, countdown, factual summaries
+• Use RAWG tools ONLY for metadata:
+  Release date, developer, platforms, genres, tags, rating, countdown, factual summaries
+• Use HowLongToBeat (hltb_lengths) for:
+  Game length (Main / Main+Extras / Completionist)
 • Use Wikipedia tools for:
   Plot/story, character info, development history, world/lore, gameplay details, DLC info
 • For plot/story:
   ALWAYS call wiki_fetch_raw first, then wiki_extract_section('plot'), then rewrite
 
-### SPOILER HANDLING & NS-MEDIUM RULES
+### SPOILER HANDLING — NS-MEDIUM POLICY
 • Default: Do NOT provide spoilers unless the user clearly requests them
 • If topic=plot (no spoiler request):
   - Provide a spoiler-free retelling in 'no_spoilers'
   - Include only early premise + setup
   - Remove twists, late-game events, and endings
 • If topic=spoilers:
-  - Provide the full story in 'spoilers'
+  - Provide the full plot in 'spoilers'
   - Add a 'warning' field: "Contains major spoilers"
   - Do not place any spoiler content in 'no_spoilers'
 • Never mix spoiler and non-spoiler content together
@@ -278,7 +297,8 @@ If topic=spoilers:
   4) Place in 'spoilers' + add 'warning'
 
 ### FIELD USAGE RULES
-• 'igdb_data' → ONLY for metadata from IGDB tools (short factual line)
+• 'igdb_data' → (TEMPORARY NAME) for storing RAWG metadata output (short factual line)
+   (You may rename this to 'rawg_data' later)
 • 'wiki_data' → Short extracted wiki content before rewriting (if needed)
 • 'summary' → A short 1-2 sentence AI rewrite/overview when user wants a general explanation
 • 'no_spoilers' → Spoiler-free plot only
@@ -291,11 +311,11 @@ If topic=spoilers:
 • Use Wikipedia only to extract and summarize DLCs and expansions
 • Do not include spoilers about DLC unless user explicitly asks
 
-### INTERNAL TOOL & PROCESSING RULES (NOT TO BE SHOWN TO USER)
+### INTERNAL TOOL & PROCESSING RULES (NEVER REVEAL TO USER)
 • First decide the topic
-• Then choose IGDB or Wikipedia based on topic
+• Then choose RAWG, HLTB, or Wikipedia tools based on topic
 • Use spoiler-processing logic internally when writing output
-• Do NOT mention internal tools, functions, or reasoning to the user
+• Do NOT mention tool names, internal functions, or reasoning
 • Your final response must strictly follow the Pydantic schema
 
 ### RESPONSE FORMAT

@@ -33,8 +33,8 @@ async def chat(req: ChatRequest):
 
 
         final_response = ""
-        if parsed.igdb_data:
-            final_response += f"{parsed.igdb_data}\n\n"
+        if parsed.rawg_data:
+            final_response += f"{parsed.rawg_data}\n\n"
         if parsed.summary:
             final_response += f"{parsed.summary}\n\n"
         if parsed.no_spoilers:

@@ -28,8 +28,8 @@ async def chat_loop():
 
             print(f"\nGaming Assistant:")
 
-            if response.igdb_data:
-                print(f"{response.igdb_data}")
+            if response.rawg_data:
+                print(f"{response.rawg_data}")
 
             if response.summary:
                 print(f"Summary: {response.summary}\n")
