@@ -1,136 +1,321 @@
+# filename: backend/main.py
+# Stage 2 – Wikipedia Tools Integrated + IGDB Tools (modular, async, silent)
+
+from __future__ import annotations
+
+import os
 from dotenv import load_dotenv
 from pydantic import BaseModel
+from typing import Optional
+
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain.tools import Tool
-import requests
-import os
-import time
+
+# IGDB + WIKI SERVICES
+from backend.services.igdb_service import IGDBService
+from backend.services.wiki_service import WikiService
+from backend.services.plot_processing import (
+    detect_spoiler_intent,
+    extract_spoiler_free,
+    extract_full_spoilers,
+    condense_plot,
+)
+
+# ---------------- ENFORCEMENT MIDDLEWARE (Stage 3D) ----------------
+from typing import Any
+import re
+
+def enforce_output_rules(parsed: Response, user_query: str) -> Response:
+    """Enforce NS-Medium spoiler safety, field hygiene, and auto-soft topic corrections."""
+
+    # 1. Auto-soft Topic Detection if missing
+    if not parsed.topic:
+        uq = user_query.lower()
+        if any(word in uq for word in ["release", "platform", "developer", "engine", "rating", "metacritic"]):
+            parsed.topic = "metadata"
+        elif "character" in uq:
+            parsed.topic = "characters"
+        elif "lore" in uq or "world" in uq:
+            parsed.topic = "lore"
+        elif "dlc" in uq or "expansion" in uq:
+            parsed.topic = "dlc"
+        elif "ending" in uq or "spoil" in uq:
+            parsed.topic = "spoilers"
+        elif "story" in uq or "plot" in uq:
+            parsed.topic = "plot"
+        elif "gameplay" in uq or "mechanic" in uq or "combat" in uq:
+            parsed.topic = "gameplay"
+        elif any(word in uq for word in ["how to", "beat", "solve", "puzzle", "tips", "guide"]):
+            parsed.topic = "tips"
+
+    # 2. Prevent spoiler leakage into no_spoilers
+    spoiler_trigger_words = ["kills", "dies", "death", "betray", "twist", "ending", "final boss", "reveals"]
+    if parsed.no_spoilers:
+        if any(word in parsed.no_spoilers.lower() for word in spoiler_trigger_words):
+            # Move content into spoilers
+            parsed.spoilers = (parsed.spoilers + "\n" + parsed.no_spoilers).strip()
+            parsed.no_spoilers = ""
+            parsed.warning = parsed.warning or "Contains major spoilers"
+
+    # 3. If spoilers exist but no warning, auto-add warning
+    if parsed.spoilers and not parsed.warning:
+        parsed.warning = "Contains major spoilers"
+
+    # 4. NS-Medium enforcement — re-filter no_spoilers if plot topic
+    if parsed.topic == "plot" and parsed.no_spoilers:
+        parsed.no_spoilers = extract_spoiler_free(parsed.no_spoilers)
+
+    # 5. Remove accidental fields or hallucinated content
+    allowed_fields = set(Response.__fields__.keys())
+    for field in list(parsed.__dict__.keys()):
+        if field not in allowed_fields:
+            del parsed.__dict__[field]
+
+    return parsed
+
+
 
 load_dotenv()
 
+# ---------------- Pydantic Model ----------------
 class Response(BaseModel):
-    summary: str
-    spoilers: str = "" 
-    no_spoilers: str = ""  
-    game_tips: str = ""  
-    lore: str = ""  
-    warning: str = ""  
-    rawg_info: str = ""  
+    summary: str = ""
+    spoilers: str = ""
+    no_spoilers: str = ""
+    game_tips: str = ""
+    lore: str = ""
+    warning: str = ""
+    igdb_data: str = ""      # short IGDB metadata line
+    wiki_data: str = ""      # NEW: short wiki extracted text
+    can_be_spoiler: bool = False # If topic is spoiler-sensitive
+    topic: str = ""              # Detected topic: metadata, plot, spoilers, characters, development, lore, gameplay, tips, dlc
 
+# ---------------- LLM + Parser ----------------
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, verbose=False, timeout=30)
-parser = PydanticOutputParser(pydantic_object= Response)
-
-# fuckass RAWG.io API integration and code
-def search_rawg_games(game_name: str) -> str:
-    """Search for game information using RAWG.io API"""
-    try:
-        api_key = os.getenv("RAWG_API_KEY")
-        if not api_key:
-            return "RAWG_API_KEY not found in environment variables. Please add your API key to .env file."
-        print(f"🔍 Searching RAWG.io for: {game_name}...")
-        # Search for the game
-        search_url = f"https://api.rawg.io/api/games?key={api_key}&search={game_name}&page_size=1"
-        response = requests.get(search_url, timeout=10)
-        
-        if response.status_code != 200:
-            return f"API Error: {response.status_code}"
-        
-        data = response.json()
-        
-        if not data['results']:
-            return f"No game found with name: {game_name}"
-        
-        game = data['results'][0]
-        game_id = game['id']
-        
-        # Get detailed information
-        details_url = f"https://api.rawg.io/api/games/{game_id}?key={api_key}"
-        details_response = requests.get(details_url, timeout=10)
-        details_data = details_response.json()
-        
-        # Format the response
-        game_info = f"""
-            GAME INFORMATION FROM RAWG.IO:
-
-            Title: {game['name']}
-            Released: {game.get('released', 'Not available')}
-            Rating: {game.get('rating', 'N/A')}/5 ({game.get('ratings_count', 0)} ratings)
-            Metacritic: {details_data.get('metacritic', 'N/A')}/100
-            Platforms: {', '.join([p['platform']['name'] for p in game['platforms']]) if game['platforms'] else 'Not specified'}
-
-            Description: {details_data.get('description_raw', game.get('description', 'No description available'))[:500]}...
-
-            Genres: {', '.join([g['name'] for g in game['genres']]) if game['genres'] else 'Not specified'}
-            Developers: {', '.join([d['name'] for d in details_data.get('developers', [])]) if details_data.get('developers') else 'Not specified'}
-            Publishers: {', '.join([p['name'] for p in details_data.get('publishers', [])]) if details_data.get('publishers') else 'Not specified'}
-
-            Playtime: {details_data.get('playtime', 'N/A')} hours average
-            """
-        return game_info
-        
-    except Exception as e:
-        return f"Error fetching game data: {str(e)}"
-    
-    # RAWG tool definition
-rawg_tool = Tool(
-    name="rawg_game_search",
-    description="Search for detailed game information from RAWG.io database including release dates, ratings, playtime, descriptions, and more",
-    func=search_rawg_games
-)
+parser = PydanticOutputParser(pydantic_object=Response)
 
 
+# ---------------- Service Instances ----------------
+_igdb = IGDBService()
+_wiki = WikiService()
+
+# ---------------- IGDB TOOLS (from Stage 1) ----------------
+async def _t_release_date(game_name: str, region_hint: Optional[str] = None) -> str:
+    return await _igdb.igdb_release_date(game_name, region_hint) or "Release date not found."
+
+async def _t_developer(game_name: str) -> str:
+    return await _igdb.igdb_developer(game_name) or "Developer not found."
+
+async def _t_platforms(game_name: str) -> str:
+    return await _igdb.igdb_platforms(game_name) or "Platforms not found."
+
+async def _t_genres(game_name: str) -> str:
+    return await _igdb.igdb_genres(game_name) or "Genres not found."
+
+async def _t_engine(game_name: str) -> str:
+    return await _igdb.igdb_engine(game_name) or "Engine not found."
+
+async def _t_rating(game_name: str) -> str:
+    return await _igdb.igdb_rating(game_name) or "Rating not found."
+
+async def _t_countdown(game_name: str, region_hint: Optional[str] = None) -> str:
+    return await _igdb.igdb_countdown(game_name, region_hint) or "No release date available."
+
+async def _t_summary(game_name: str) -> str:
+    return await _igdb.igdb_summary(game_name) or "Summary unavailable."
+
+
+# ---------------- WIKIPEDIA TOOLS (NEW – Stage 2) ----------------
+async def _t_wiki_fetch_raw(title: str) -> str:
+    """Fetch full wiki page plain text."""
+    return await _wiki.fetch_wiki_page_raw(title) or "No Wikipedia page found."
+
+def _t_wiki_extract_section(raw_text: str, section: str) -> str:
+    """Extract specific section text (Plot, Characters, Development, Gameplay)."""
+    return _wiki.extract_section(raw_text, section) or "Section not found."
+
+def _t_wiki_clean_text(text: str) -> str:
+    """Clean Wiki text by stripping citations and extra formatting."""
+    return _wiki.clean_wiki_text(text)
+
+
+# ---------------- TOOL REGISTRY ----------------
+tools = [
+    # ---- IGDB SHORT FACT TOOLS ----
+    Tool(
+        name="igdb_release_date",
+        description="Short release date. Input: game_name, optional region_hint.",
+        func=lambda *_, **__: "use coroutine",
+        coroutine=lambda game_name, region_hint=None: _t_release_date(game_name, region_hint),
+    ),
+    Tool(
+        name="igdb_developer",
+        description="Short primary developer name. Input: game_name.",
+        func=lambda *_, **__: "use coroutine",
+        coroutine=lambda game_name: _t_developer(game_name),
+    ),
+    Tool(
+        name="igdb_platforms",
+        description="Short comma-separated platforms. Input: game_name.",
+        func=lambda *_, **__: "use coroutine",
+        coroutine=lambda game_name: _t_platforms(game_name),
+    ),
+    Tool(
+        name="igdb_genres",
+        description="Short comma-separated genres. Input: game_name.",
+        func=lambda *_, **__: "use coroutine",
+        coroutine=lambda game_name: _t_genres(game_name),
+    ),
+    Tool(
+        name="igdb_engine",
+        description="Short engine name. Input: game_name.",
+        func=lambda *_, **__: "use coroutine",
+        coroutine=lambda game_name: _t_engine(game_name),
+    ),
+    Tool(
+        name="igdb_rating",
+        description="Short IGDB rating summary. Input: game_name.",
+        func=lambda *_, **__: "use coroutine",
+        coroutine=lambda game_name: _t_rating(game_name),
+    ),
+    Tool(
+        name="igdb_countdown",
+        description="Release countdown or release date. Input: game_name, optional region_hint.",
+        func=lambda *_, **__: "use coroutine",
+        coroutine=lambda game_name, region_hint=None: _t_countdown(game_name, region_hint),
+    ),
+    Tool(
+        name="igdb_summary",
+        description="Factual 2–3 line IGDB summary. Input: game_name.",
+        func=lambda *_, **__: "use coroutine",
+        coroutine=lambda game_name: _t_summary(game_name),
+    ),
+
+    # ---- WIKIPEDIA RAW + SECTION TOOLS ----
+    Tool(
+        name="wiki_fetch_raw",
+        description=(
+            "Fetch full raw Wikipedia page text. Input: title. "
+            "Use this BEFORE requesting plot/characters/dev info."
+        ),
+        func=lambda *_, **__: "use coroutine",
+        coroutine=lambda title: _t_wiki_fetch_raw(title),
+    ),
+    Tool(
+        name="wiki_extract_section",
+        description=(
+            "Extract a section from raw Wikipedia text. Input: raw_text, section_name. "
+            "Section_name examples: plot, characters, development, gameplay."
+        ),
+        func=lambda raw_text, section_name: _t_wiki_extract_section(raw_text, section_name),
+    ),
+    Tool(
+        name="wiki_clean_text",
+        description="Clean wiki text: remove [1], [2], etc. Input: text.",
+        func=lambda text: _t_wiki_clean_text(text),
+    ),
+]
+
+
+# ---------------- UPDATED PROMPT ----------------
 prompt = ChatPromptTemplate.from_messages(
     [
         (
             "system",
             """
-            You are an expert gaming assistant with deep knowledge of video games across all platforms and genres.
-            
-            CORE RESPONSIBILITIES:
-            1. GAME SUMMARIES: Provide concise overviews of games including gameplay, story, and features
-            2. LORE & STORY: 
-               - Default: Provide lore without spoilers
-               - If user asks for spoilers: Provide detailed spoiler-filled lore in 'spoilers' field
-               - Always include a spoiler warning when giving spoilers
-            3. GAME HELP: Provide codes, cheats, puzzle solutions, and tips when requested
-            4. CHARACTERS & WORLD: Detailed information about game characters, worlds, and lore
-            5. REAL-TIME DATA: Use the RAWG.io tool to get accurate, up-to-date game information when needed
-            
-            RESPONSE GUIDELINES:
-            - Be conversational and engaging - like a fellow gamer
-            - Don't repeat full introductions in follow-up questions
-            - Use natural language and gaming terminology
-            - If unsure about spoilers, ask for clarification
-            - Mark spoiler content clearly
-            - Provide practical, useful gaming advice
-            - Use the RAWG.io tool for factual game data like release dates, ratings, platforms
-            - Only discuss video games and related content, strictly avoid other topics
-            
-            WHEN TO USE RAWG.IO TOOL:
-            - When user asks about game details, release dates, platforms
-            - When you need accurate, up-to-date game information
-            - When user asks "what platforms is [game] on?" or "when was [game] released? or "playtime of [game]?"
-            
-            FORMAT: Provide responses in this structured format:
-            {format_instructions}
-            """
-            ),  
-            (placeholder1 := "{chat_history}"),
-            (human := "{question}"),
-            (placeholder2 := "{agent_scratchpad}"),
+You are an expert gaming assistant.
+
+Your #1 rule: Answer ONLY what the user asked for. Keep responses short, precise, and avoid unnecessary information.
+
+### TOPIC CLASSIFICATION RULES
+• For every user request, classify it into ONE topic and set the 'topic' field accordingly.
+• Valid topics: metadata, plot, spoilers, characters, development, lore, gameplay, tips, dlc
+• Use the topic to decide which tools and fields to use.
+• Examples:
+  - “When was Elden Ring released?” → metadata
+  - “Explain the story of Elden Ring” → plot
+  - “Spoil Elden Ring ending” → spoilers
+  - “Who are the characters in God of War 3?” → characters
+  - “How was GTA V developed?” → development
+  - “What's the lore of Dark Souls?” → lore
+  - “How do I beat Malenia?” → tips
+  - “List Witcher 3 DLCs” → dlc
+
+### DATA SOURCE RULES
+• Use IGDB tools ONLY for metadata:
+  Release date, developer, platforms, genres, engine, rating, countdown, factual summaries
+• Use Wikipedia tools for:
+  Plot/story, character info, development history, world/lore, gameplay details, DLC info
+• For plot/story:
+  ALWAYS call wiki_fetch_raw first, then wiki_extract_section('plot'), then rewrite
+
+### SPOILER HANDLING & NS-MEDIUM RULES
+• Default: Do NOT provide spoilers unless the user clearly requests them
+• If topic=plot (no spoiler request):
+  - Provide a spoiler-free retelling in 'no_spoilers'
+  - Include only early premise + setup
+  - Remove twists, late-game events, and endings
+• If topic=spoilers:
+  - Provide the full story in 'spoilers'
+  - Add a 'warning' field: "Contains major spoilers"
+  - Do not place any spoiler content in 'no_spoilers'
+• Never mix spoiler and non-spoiler content together
+
+### PLOT ROUTING LOGIC
+If topic=plot (no spoiler intent):
+  1) Use wiki_fetch_raw
+  2) Use wiki_extract_section('plot')
+  3) Apply spoiler-free processing (trim twists, ending)
+  4) Place result into 'no_spoilers'
+
+If topic=spoilers:
+  1) Use wiki_fetch_raw
+  2) Use wiki_extract_section('plot')
+  3) Use full plot (no trimming)
+  4) Place in 'spoilers' + add 'warning'
+
+### FIELD USAGE RULES
+• 'igdb_data' → ONLY for metadata from IGDB tools (short factual line)
+• 'wiki_data' → Short extracted wiki content before rewriting (if needed)
+• 'summary' → A short 1-2 sentence AI rewrite/overview when user wants a general explanation
+• 'no_spoilers' → Spoiler-free plot only
+• 'spoilers' → Only when requested
+• 'lore' → Use for worldbuilding, universe history, backstory, mythology, timelines
+• 'game_tips' → Only for help, guides, puzzles, combat strategies, or how to beat something
+
+### DLC RULES
+• For DLC requests, treat the topic as dlc
+• Use Wikipedia only to extract and summarize DLCs and expansions
+• Do not include spoilers about DLC unless user explicitly asks
+
+### INTERNAL TOOL & PROCESSING RULES (NOT TO BE SHOWN TO USER)
+• First decide the topic
+• Then choose IGDB or Wikipedia based on topic
+• Use spoiler-processing logic internally when writing output
+• Do NOT mention internal tools, functions, or reasoning to the user
+• Your final response must strictly follow the Pydantic schema
+
+### RESPONSE FORMAT
+Return the response using the Pydantic format below — do NOT add extra fields:
+{format_instructions}
+""",
+        ),
+        "{chat_history}",
+        "{question}",
+        "{agent_scratchpad}",
     ]
 ).partial(format_instructions=parser.get_format_instructions())
 
-# CHANGED: Added tools to agent creation, just RAWG for now
-tools = [rawg_tool] 
 
+
+# ---------------- AGENT + EXECUTOR ----------------
 agent = create_tool_calling_agent(
     llm=llm,
     prompt=prompt,
-    tools = tools,
+    tools=tools,
 )
 
-agent_executor=AgentExecutor(agent=agent, tools=tools, verbose=True)
+agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
