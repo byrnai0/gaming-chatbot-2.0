@@ -102,7 +102,7 @@ backend/
 
 ---
 
-### 8. Future Enhancements (Planned Work)
+### 5. Future Enhancements (Planned Work)
 
 The following items have been identified for future implementation:
 
@@ -113,7 +113,7 @@ The following items have been identified for future implementation:
 | User Preference Memory                          | Learns user tastes to provide personalized suggestions |
 | Frontend UI (React)                             | Web interface for end-users                            |
 
-### 10. Acknowledgements
+### 6. Acknowledgements
 
 - RAWG.io for metadata
 
