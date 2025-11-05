@@ -1,5 +1,5 @@
 # filename: backend/main.py
-# Stage 2 – Wikipedia Tools Integrated + IGDB Tools (modular, async, silent)
+# Stage 2 – Wikipedia Tools Integrated + RAWG Tools (modular, async, silent)
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain.agents import create_tool_calling_agent, AgentExecutor
-from langchain.tools import Tool
+from langchain.tools import Tool, StructuredTool
 
 # IGDB + WIKI SERVICES
 from backend.services.rawg_service import RAWGService
@@ -29,7 +29,19 @@ from backend.services.plot_processing import (
 from typing import Any
 import re
 
+async def run_agent(query: str, chat_history: list[str]):
+    res = await agent_executor.ainvoke({"question": query, "chat_history": chat_history})
+    parsed = parser.parse(res["output"])
+    parsed = enforce_output_rules(parsed, query)
+    return parsed
+
 def enforce_output_rules(parsed: Response, user_query: str) -> Response:
+    # Detect length interest (SMART)
+    length_keywords = ["long", "short", "hours", "time to beat", "how long", "length"]
+    if any(word in user_query.lower() for word in length_keywords):
+        if parsed.topic in ["", None, "summary"]:
+            parsed.topic = "metadata"
+
     """Enforce NS-Medium spoiler safety, field hygiene, and auto-soft topic corrections."""
 
     # 1. Auto-soft Topic Detection if missing
@@ -89,7 +101,8 @@ class Response(BaseModel):
     game_tips: str = ""
     lore: str = ""
     warning: str = ""
-    rawg_data: str = ""      # short IGDB metadata line
+    rawg_data: str = ""      # short RAWG metadata line
+    game_length: str = ""     # HLTB length (3-line HL3 format)
     wiki_data: str = ""      # NEW: short wiki extracted text
     can_be_spoiler: bool = False # If topic is spoiler-sensitive
     topic: str = ""              # Detected topic: metadata, plot, spoilers, characters, development, lore, gameplay, tips, dlc
@@ -136,9 +149,9 @@ async def _t_wiki_fetch_raw(title: str) -> str:
     """Fetch full wiki page plain text."""
     return await _wiki.fetch_wiki_page_raw(title) or "No Wikipedia page found."
 
-def _t_wiki_extract_section(raw_text: str, section: str) -> str:
+def _t_wiki_extract_section(raw_text: str, section_name: str) -> str:
     """Extract specific section text (Plot, Characters, Development, Gameplay)."""
-    return _wiki.extract_section(raw_text, section) or "Section not found."
+    return _wiki.extract_section(raw_text, section_name) or "Section not found."
 
 def _t_wiki_clean_text(text: str) -> str:
     """Clean Wiki text by stripping citations and extra formatting."""
@@ -148,6 +161,8 @@ def _t_wiki_clean_text(text: str) -> str:
 async def _t_hltb_lengths(game_name: str) -> str:
     return await _hltb.lengths(game_name) or "Length not found."
 
+def _wiki_extract_section_tool(raw_text: str, section_name: str) -> str:
+    return _t_wiki_extract_section(raw_text, section_name)
 
 
 # ---------------- TOOL REGISTRY ----------------
@@ -212,27 +227,28 @@ tools = [
 
     # ---- WIKIPEDIA RAW + SECTION TOOLS (KEEP AS IS) ----
     Tool(
-        name="wiki_fetch_raw",
-        description=(
-            "Fetch full raw Wikipedia page text. Input: title. "
-            "Use this BEFORE requesting plot/characters/dev info."
-        ),
-        func=lambda *_, **__: "use coroutine",
-        coroutine=lambda title: _t_wiki_fetch_raw(title),
+    name="wiki_fetch_raw",
+    description=(
+        "Fetch full raw Wikipedia page text. Input: title. "
+        "Use this BEFORE requesting plot/characters/dev info."
+    ),
+    func=lambda *_, **__: "use coroutine",
+    coroutine=lambda title: _t_wiki_fetch_raw(title),
+    ),
+    StructuredTool.from_function(
+    name="wiki_extract_section",
+    description=(
+        "Extract a section from raw Wikipedia text. "
+        "Arguments: raw_text (string), section_name (string). "
+        "Examples: plot, characters, development, gameplay, dlc."
+    ),
+    func=_wiki_extract_section_tool,
     ),
     Tool(
-        name="wiki_extract_section",
-        description=(
-            "Extract a section from raw Wikipedia text. Input: raw_text, section_name. "
-            "Section_name examples: plot, characters, development, gameplay."
-        ),
-        func=lambda raw_text, section_name: _t_wiki_extract_section(raw_text, section_name),
-    ),
-    Tool(
-        name="wiki_clean_text",
-        description="Clean wiki text: remove [1], [2], etc. Input: text.",
-        func=lambda text: _t_wiki_clean_text(text),
-    ),
+    name="wiki_clean_text",
+    description="Clean wiki text: remove [1], [2], etc. Input: text.",
+    func=lambda text: _t_wiki_clean_text(text),
+    ),  
 ]
 
 
@@ -297,8 +313,7 @@ If topic=spoilers:
   4) Place in 'spoilers' + add 'warning'
 
 ### FIELD USAGE RULES
-• 'igdb_data' → (TEMPORARY NAME) for storing RAWG metadata output (short factual line)
-   (You may rename this to 'rawg_data' later)
+•  'rawg_data' → Store RAWG metadata output (short factual line)
 • 'wiki_data' → Short extracted wiki content before rewriting (if needed)
 • 'summary' → A short 1-2 sentence AI rewrite/overview when user wants a general explanation
 • 'no_spoilers' → Spoiler-free plot only
