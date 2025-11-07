@@ -353,4 +353,4 @@ agent = create_tool_calling_agent(
     tools=tools,
 )
 
-agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
+agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=False)
