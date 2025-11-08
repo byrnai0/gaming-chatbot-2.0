@@ -1,4 +1,4 @@
-# filename: backend/services/wiki_service.py
+# wiki service for fetching and cleaning Wikipedia content
 from __future__ import annotations
 
 import httpx
@@ -14,12 +14,12 @@ WIKI_HEADERS = {
 
 
 class WikiService:
-    """Wikipedia fetch + section extraction + cleaning."""
+    # Wikipedia fetch + section extraction + cleaning
 
     async def fetch_wiki_page_raw(self, title: str) -> Optional[str]:
         """
         Fetch the full plain-text extract of a Wikipedia page.
-        Returns None if not found.
+        Returns None if page not found or error.
         """
         params = {
             "action": "query",
@@ -64,7 +64,7 @@ class WikiService:
         # Split by headings
         parts = re.split(r"\n==+\s*(.+?)\s*==+\n", raw_text)
 
-        # parts = [before first heading, heading1, text1, heading2, text2, ...]
+        # parts structure: [intro, heading1, body1, heading2, body2, ...]
         for i in range(1, len(parts), 2):
             heading = parts[i].lower()
             body = parts[i + 1]

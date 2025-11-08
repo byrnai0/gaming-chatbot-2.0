@@ -1,4 +1,4 @@
-# filename: backend/services/rawg_service.py
+# rawg service for game metadata
 from __future__ import annotations
 
 import os
@@ -24,7 +24,7 @@ def _fmt_date(yyyy_mm_dd: Optional[str]) -> Optional[str]:
         dt = datetime.strptime(yyyy_mm_dd, "%Y-%m-%d")
         return dt.strftime("%d %b %Y")
     except Exception:
-        return yyyy_mm_dd  # already human-ish
+        return yyyy_mm_dd 
 
 
 def _days_until(yyyy_mm_dd: Optional[str]) -> Optional[int]:
@@ -41,7 +41,7 @@ def _days_until(yyyy_mm_dd: Optional[str]) -> Optional[int]:
 
 class RAWGService:
     """
-    Minimal async RAWG client for short-text answers (R1).
+    Minimal async RAWG client for short-text answers.
     No OAuth; uses RAWG_API_KEY from .env.
     """
 
@@ -50,7 +50,7 @@ class RAWGService:
         self.key = RAWG_API_KEY
         self.headers = {"Accept": "application/json"}
 
-    # ---------- low-level helpers ----------
+    # low level helpers
 
     async def _get(self, path: str, params: Dict[str, Any]) -> Dict[str, Any] | List[Dict[str, Any]] | None:
         url = f"{self.base}/{path.lstrip('/')}"
@@ -75,7 +75,7 @@ class RAWGService:
             return data
         return None
 
-    # ---------- high-level short text helpers ----------
+    # high level methods
 
     async def release_date(self, game_name: str) -> Optional[str]:
         hit = await self._search_best(game_name)
@@ -157,7 +157,7 @@ class RAWGService:
         return ", ".join(parts) if parts else None
 
     async def summary(self, game_name: str) -> Optional[str]:
-        # 2–3 lines, factual (from RAWG details)
+        # 2–3 lines of basic metadata
         hit = await self._search_best(game_name)
         if not hit:
             return None

@@ -1,4 +1,4 @@
-# filename: backend/services/hltb_service.py
+#How Long To Beat service wrapper
 from __future__ import annotations
 
 import asyncio
@@ -9,8 +9,7 @@ from howlongtobeatpy import HowLongToBeat
 
 class HLTBService:
     """
-    Thin wrapper around howlongtobeatpy. Runs sync search in a thread
-    so our app stays async-friendly.
+    howlongtobeatpy wrapper service for asynchronous game length retrieval.
     """
 
     async def lengths(self, game_name: str) -> Optional[str]:

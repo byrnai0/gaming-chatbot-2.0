@@ -1,33 +1,31 @@
-# filename: backend/services/plot_processing.py
-# Stage 3B – Plot & Spoiler Processing Utilities (NS-Medium)
-
+#plot processing utilities for spoiler handling and text cleaning
 from __future__ import annotations
 import re
 from typing import Tuple
 
 
-# ---- 1. Detect if user explicitly wants spoilers ----
+#Check if user input indicates spoiler intent
 SPOILER_KEYWORDS = [
     "spoiler", "spoil", "ending", "end of", "plot twist", "who dies", "death of",
     "reveal", "true ending", "bad ending", "good ending", "secret ending",
 ]
 
 def detect_spoiler_intent(user_input: str) -> bool:
-    """Return True if the user is clearly asking for spoilers or endings."""
+    """Return True if user input suggests they want spoilers."""
     text = user_input.lower()
     return any(word in text for word in SPOILER_KEYWORDS)
 
 
-# ---- 2. Remove citations, parentheses bloat, repeat spaces ----
+#Remove any unwanted text element from plot summaries
 def clean_plot_text(text: str) -> str:
     """Normalize plot text before further processing."""
     text = re.sub(r"\[\d+\]", "", text)          # Remove [1], [2], etc
     text = re.sub(r"\s{2,}", " ", text)          # Remove double spaces
-    text = re.sub(r"\([^)]{0,30}\)", "", text)   # Remove small bracketed notes (NS-Medium safe)
+    text = re.sub(r"\([^)]{0,30}\)", "", text)   # Remove small bracketed notes 
     return text.strip()
 
 
-# ---- 3. Split plot into early/mid/late segments ----
+#Split plot text into early, mid, late sections
 def split_plot_sections(text: str) -> Tuple[str, str, str]:
     """
     Very rough segmentation: first 30% = early (safe), next 40% = mid (partial),
@@ -50,11 +48,10 @@ def split_plot_sections(text: str) -> Tuple[str, str, str]:
     )
 
 
-# ---- 4. NS-MEDIUM SPOILER-FREE PLOT ----
+#Spoiler free extraction for NS-Medium
 def extract_spoiler_free(text: str) -> str:
     """
     Keep only early premise + partial setup. Remove mid-game twists + ending.
-    Good for NS-Medium.
     """
     text = clean_plot_text(text)
     early, mid, _late = split_plot_sections(text)
@@ -81,13 +78,13 @@ def extract_spoiler_free(text: str) -> str:
     return final_text.strip()
 
 
-# ---- 5. FULL SPOILERS EXTRACTION ----
+#Full spoiler extraction
 def extract_full_spoilers(text: str) -> str:
     """Return cleaned full plot text (no trimming)."""
     return clean_plot_text(text)
 
 
-# ---- 6. Condense a full plot into 3–6 sentences ----
+#Condense plot into short summary
 def condense_plot(text: str, max_sentences: int = 5) -> str:
     """
     Compress a plot into a short readable summary.

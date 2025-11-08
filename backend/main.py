@@ -1,7 +1,5 @@
-# filename: backend/main.py
-# Stage 2 – Wikipedia Tools Integrated + RAWG Tools (modular, async, silent)
-
-from __future__ import annotations
+#main file for backend logic
+from __future__ import annotations 
 
 import os
 from dotenv import load_dotenv
@@ -25,7 +23,7 @@ from backend.services.plot_processing import (
     condense_plot,
 )
 
-# ---------------- ENFORCEMENT MIDDLEWARE (Stage 3D) ----------------
+#Enforce output rules
 from typing import Any
 import re
 
@@ -36,7 +34,7 @@ async def run_agent(query: str, chat_history: list[str]):
     return parsed
 
 def enforce_output_rules(parsed: Response, user_query: str) -> Response:
-    # Detect length interest (SMART)
+    
     length_keywords = ["long", "short", "hours", "time to beat", "how long", "length"]
     if any(word in user_query.lower() for word in length_keywords):
         if parsed.topic in ["", None, "summary"]:
@@ -44,7 +42,7 @@ def enforce_output_rules(parsed: Response, user_query: str) -> Response:
 
     """Enforce NS-Medium spoiler safety, field hygiene, and auto-soft topic corrections."""
 
-    # 1. Auto-soft Topic Detection if missing
+    
     if not parsed.topic:
         uq = user_query.lower()
         if any(word in uq for word in ["release", "platform", "developer", "engine", "rating", "metacritic"]):
@@ -64,24 +62,24 @@ def enforce_output_rules(parsed: Response, user_query: str) -> Response:
         elif any(word in uq for word in ["how to", "beat", "solve", "puzzle", "tips", "guide"]):
             parsed.topic = "tips"
 
-    # 2. Prevent spoiler leakage into no_spoilers
+    #Prepare spoiler intent
     spoiler_trigger_words = ["kills", "dies", "death", "betray", "twist", "ending", "final boss", "reveals"]
     if parsed.no_spoilers:
         if any(word in parsed.no_spoilers.lower() for word in spoiler_trigger_words):
-            # Move content into spoilers
+            #Move to spoilers
             parsed.spoilers = (parsed.spoilers + "\n" + parsed.no_spoilers).strip()
             parsed.no_spoilers = ""
             parsed.warning = parsed.warning or "Contains major spoilers"
 
-    # 3. If spoilers exist but no warning, auto-add warning
+    #If topic is plot or spoilers, ensure spoiler handling
     if parsed.spoilers and not parsed.warning:
         parsed.warning = "Contains major spoilers"
 
-    # 4. NS-Medium enforcement — re-filter no_spoilers if plot topic
+    #NS-Medium enforcement — re-filter no_spoilers if plot topic
     if parsed.topic == "plot" and parsed.no_spoilers:
         parsed.no_spoilers = extract_spoiler_free(parsed.no_spoilers)
 
-    # 5. Remove accidental fields or hallucinated content
+    #Remove accidental fields or hallucinated content
     allowed_fields = set(Response.__fields__.keys())
     for field in list(parsed.__dict__.keys()):
         if field not in allowed_fields:
@@ -93,31 +91,31 @@ def enforce_output_rules(parsed: Response, user_query: str) -> Response:
 
 load_dotenv()
 
-# ---------------- Pydantic Model ----------------
+#Pydantic Model
 class Response(BaseModel):
-    summary: str = ""
-    spoilers: str = ""
-    no_spoilers: str = ""
-    game_tips: str = ""
-    lore: str = ""
-    warning: str = ""
-    rawg_data: str = ""      # short RAWG metadata line
-    game_length: str = ""     # HLTB length (3-line HL3 format)
-    wiki_data: str = ""      # NEW: short wiki extracted text
-    can_be_spoiler: bool = False # If topic is spoiler-sensitive
-    topic: str = ""              # Detected topic: metadata, plot, spoilers, characters, development, lore, gameplay, tips, dlc
+    summary: str = ""                   # summary or overview
+    spoilers: str = ""                  # spoilers if requested
+    no_spoilers: str = ""               # spoiler-free plot
+    game_tips: str = ""                 # tips, guides, help
+    lore: str = ""                      # lore, worldbuilding, backstory
+    warning: str = ""                   # spoiler warning if applicable
+    rawg_data: str = ""                 # short RAWG metadata line
+    game_length: str = ""               # HowLongToBeat lengths
+    wiki_data: str = ""                 # short wiki extracted text
+    can_be_spoiler: bool = False        # If topic is spoiler-sensitive
+    topic: str = ""                     # metadata, plot, spoilers, characters, development, lore, gameplay, tips, dlc
 
-# ---------------- LLM + Parser ----------------
+#LLM & Parser
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, verbose=False, timeout=30)
 parser = PydanticOutputParser(pydantic_object=Response)
 
 
-# ---------------- Service Instances ----------------
+#Service Instances
 _rawg = RAWGService()
 _wiki = WikiService()
 _hltb = HLTBService()
 
-# ---------------- RAWG TOOLS (metadata short answers) ----------------
+#RAWG TOOLS
 async def _t_release_date(game_name: str) -> str:
     return await _rawg.release_date(game_name) or "Release date not found."
 
@@ -144,7 +142,7 @@ async def _t_summary(game_name: str) -> str:
 
 
 
-# ---------------- WIKIPEDIA TOOLS (NEW – Stage 2) ----------------
+#WIKIPEDIA TOOLS
 async def _t_wiki_fetch_raw(title: str) -> str:
     """Fetch full wiki page plain text."""
     return await _wiki.fetch_wiki_page_raw(title) or "No Wikipedia page found."
@@ -157,7 +155,7 @@ def _t_wiki_clean_text(text: str) -> str:
     """Clean Wiki text by stripping citations and extra formatting."""
     return _wiki.clean_wiki_text(text)
 
-# ---------------- HLTB TOOL (game length) ----------------
+#HLTB TOOL
 async def _t_hltb_lengths(game_name: str) -> str:
     return await _hltb.lengths(game_name) or "Length not found."
 
@@ -165,9 +163,9 @@ def _wiki_extract_section_tool(raw_text: str, section_name: str) -> str:
     return _t_wiki_extract_section(raw_text, section_name)
 
 
-# ---------------- TOOL REGISTRY ----------------
+#Tool Definitions
 tools = [
-    # ---- RAWG SHORT FACT TOOLS ----
+    #RAWG Tools
     Tool(
         name="rawg_release_date",
         description="Short release date. Input: game_name.",
@@ -217,7 +215,7 @@ tools = [
         coroutine=lambda game_name: _t_summary(game_name),
     ),
 
-    # ---- HLTB GAME LENGTH ----
+    #HLTB Tool
     Tool(
         name="hltb_lengths",
         description="Game length from HowLongToBeat. Input: game_name. Returns 'Main | Main+Extras | Completionist'.",
@@ -225,7 +223,7 @@ tools = [
         coroutine=lambda game_name: _t_hltb_lengths(game_name),
     ),
 
-    # ---- WIKIPEDIA RAW + SECTION TOOLS (KEEP AS IS) ----
+    #Wikipedia Tools
     Tool(
     name="wiki_fetch_raw",
     description=(
@@ -251,9 +249,7 @@ tools = [
     ),  
 ]
 
-
-
-# ---------------- UPDATED PROMPT ----------------
+#Prompt Template
 prompt = ChatPromptTemplate.from_messages(
     [
         (
@@ -261,7 +257,7 @@ prompt = ChatPromptTemplate.from_messages(
             """
 You are an expert gaming assistant.
 
-Your #1 rule: Answer ONLY what the user asked for. Keep responses short, precise, and avoid unnecessary information.
+Your #1 rule: Answer ONLY what the user asked for. Keep responses short, precise, and avoid unnecessary information. Consider any questions asked by the user as a gaming related query.
 
 ### TOPIC CLASSIFICATION RULES
 • For every user request, classify it into ONE topic and set the 'topic' field accordingly.
@@ -346,7 +342,7 @@ Return the response using the Pydantic format below — do NOT add extra fields:
 
 
 
-# ---------------- AGENT + EXECUTOR ----------------
+#Agent Executor
 agent = create_tool_calling_agent(
     llm=llm,
     prompt=prompt,
