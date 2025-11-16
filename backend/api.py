@@ -1,4 +1,4 @@
-#api file for backend handling
+# api file for backend handling
 from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,7 +17,7 @@ app.add_middleware(
 )
 
 class ChatRequest(BaseModel):
-    message: str
+    query: str  # Changed from 'message' to match frontend
     history: list[str] = []
 
 class ChatResponse(BaseModel):
@@ -26,13 +26,17 @@ class ChatResponse(BaseModel):
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     try:
-        res = await agent_executor.ainvoke({"question": req.message, "chat_history": req.history})
+        # Use 'query' to match what frontend sends
+        res = await agent_executor.ainvoke({
+            "question": req.query,  # Changed from req.message
+            "chat_history": req.history
+        })
 
         # Parse structured model
         parsed = parser.parse(res["output"])
 
         # Enforce rules
-        parsed = enforce_output_rules(parsed, req.message)
+        parsed = enforce_output_rules(parsed, req.query)  # Changed from req.message
 
         # Format to human text
         final = format_response(parsed)
