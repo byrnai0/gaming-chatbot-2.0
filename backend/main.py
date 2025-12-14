@@ -217,11 +217,16 @@ tools = [
 
     #HLTB Tool
     Tool(
-        name="hltb_lengths",
-        description="Game length from HowLongToBeat. Input: game_name. Returns 'Main | Main+Extras | Completionist'.",
-        func=lambda *_, **__: "use coroutine",
-        coroutine=lambda game_name: _t_hltb_lengths(game_name),
+    name="hltb_lengths",
+    description=(
+        "Get game completion times from HowLongToBeat. "
+        "Input: exact game_name (e.g., 'Days Gone', 'The Witcher 3'). "
+        "Returns 'Main | Main+Extras | Completionist' hours."
     ),
+    func=lambda *_, **__: "use coroutine",
+    coroutine=lambda game_name: _t_hltb_lengths(game_name),
+    ),
+
 
     #Wikipedia Tools
     Tool(
@@ -278,6 +283,7 @@ Your #1 rule: Answer ONLY what the user asked for. Keep responses short, precise
   Release date, developer, platforms, genres, tags, rating, countdown, factual summaries
 • Use HowLongToBeat (hltb_lengths) for:
   Game length (Main / Main+Extras / Completionist)
+  IMPORTANT: Pass the EXACT game name from user query (e.g., "Days Gone", not "Days Gone PS4")
 • Use Wikipedia tools for:
   Plot/story, character info, development history, world/lore, gameplay details, DLC info
 • For plot/story:
@@ -349,4 +355,4 @@ agent = create_tool_calling_agent(
     tools=tools,
 )
 
-agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=False)
+agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)

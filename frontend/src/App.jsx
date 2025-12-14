@@ -1,87 +1,87 @@
-import { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
-import ChatMessage from './components/ChatMessage';
-import ChatInput from './components/ChatInput';
-import LoadingDots from './components/LoadingDots';
+import { useState } from 'react'
+import './App.css'
 
 function App() {
-  const [messages, setMessages] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const messagesEndRef = useRef(null);
+  const [messages, setMessages] = useState([])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  const formatResponse = (data) => {
+    // Extract only non-empty fields that matter
+    const parts = []
+    
+    if (data.summary) parts.push(data.summary)
+    if (data.no_spoilers) parts.push(data.no_spoilers)
+    if (data.game_length) parts.push(`⏱️ ${data.game_length}`)
+    if (data.lore) parts.push(data.lore)
+    if (data.game_tips) parts.push(data.game_tips)
+    if (data.rawg_data) parts.push(data.rawg_data)
+    
+    if (data.warning) parts.push(`⚠️ ${data.warning}`)
+    if (data.spoilers) parts.push(data.spoilers)
+    
+    return parts.length > 0 ? parts.join('\n\n') : 'No information found.'
+  }
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+  const sendMessage = async () => {
+    if (!input.trim()) return
 
-  const handleSend = async (userMessage) => {
-    setMessages(prev => [...prev, { text: userMessage, isUser: true }]);
-    setLoading(true);
+    const userMessage = { role: 'user', content: input }
+    setMessages([...messages, userMessage])
+    setInput('')
+    setLoading(true)
 
     try {
-      const response = await axios.post('/chat', {
-        query: userMessage
-      });
-
-      setMessages(prev => [...prev, { 
-        text: response.data.response || response.data.message, 
-        isUser: false 
-      }]);
+      const response = await fetch('http://127.0.0.1:8000/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: input })
+      })
+      
+      const data = await response.json()
+      const botMessage = { 
+        role: 'assistant', 
+        content: formatResponse(data)
+      }
+      setMessages(prev => [...prev, botMessage])
     } catch (error) {
-      setMessages(prev => [...prev, { 
-        text: 'Sorry, something went wrong. Please try again.', 
-        isUser: false 
-      }]);
-      console.error('Error:', error);
-    } finally {
-      setLoading(false);
+      const errorMessage = { 
+        role: 'assistant', 
+        content: 'Error: Could not connect to server' 
+      }
+      setMessages(prev => [...prev, errorMessage])
     }
-  };
+    
+    setLoading(false)
+  }
 
   return (
-    <div className="flex flex-col h-screen bg-darker">
-      {/* Header */}
-      <header className="bg-dark border-b border-slate-700 p-4">
-        <div className="max-w-4xl mx-auto">
-          <h1 className="text-2xl font-bold text-transparent bg-clip-text 
-                         bg-gradient-to-r from-primary to-secondary">
-            Gaming Chatbot 2.0
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Ask me anything about video games
-          </p>
-        </div>
-      </header>
-
-      {/* Chat Area */}
-      <div className="flex-1 overflow-y-auto chat-scroll">
-        <div className="max-w-4xl mx-auto p-4">
-          {messages.length === 0 && (
-            <div className="text-center mt-20">
-              <div className="text-6xl mb-4">🎮</div>
-              <h2 className="text-xl text-slate-300 mb-2">Welcome to Gaming Chatbot</h2>
-              <p className="text-slate-500">Ask about game details, playtime, plot summaries, and more</p>
+    <div className="app">
+      <div className="chat-container">
+        <h1>Gaming Assistant</h1>
+        
+        <div className="messages">
+          {messages.map((msg, i) => (
+            <div key={i} className={`message ${msg.role}`}>
+              {msg.content}
             </div>
-          )}
-          
-          {messages.map((msg, idx) => (
-            <ChatMessage key={idx} message={msg.text} isUser={msg.isUser} />
           ))}
-          
-          {loading && <LoadingDots />}
-          <div ref={messagesEndRef} />
+          {loading && <div className="message assistant">Thinking...</div>}
         </div>
-      </div>
 
-      {/* Input Area */}
-      <div className="max-w-4xl mx-auto w-full">
-        <ChatInput onSend={handleSend} disabled={loading} />
+        <div className="input-box">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+            placeholder="Ask about a game..."
+          />
+          <button onClick={sendMessage}>Send</button>
+        </div>
       </div>
     </div>
-  );
+  )
 }
 
-export default App;
+export default App

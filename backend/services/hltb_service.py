@@ -1,32 +1,29 @@
-#How Long To Beat service wrapper
 from __future__ import annotations
-
-import asyncio
-from typing import Optional
 
 from howlongtobeatpy import HowLongToBeat
 
-
 class HLTBService:
-    """
-    howlongtobeatpy wrapper service for asynchronous game length retrieval.
-    """
-
-    async def lengths(self, game_name: str) -> Optional[str]:
-        def _search():
-            return HowLongToBeat().search(game_name)
-
-        # Run blocking search in a thread
-        results = await asyncio.to_thread(_search)
-        if not results:
+    async def lengths(self, game_name: str) -> str:
+        """Safe wrapper around HLTB async search. Never throws."""
+        
+        try:
+            # Use async_search directly (not search() with to_thread)
+            results = await HowLongToBeat().async_search(game_name)
+            
+            if not results or len(results) == 0:
+                return None
+            
+            # Get best match by similarity
+            best = max(results, key=lambda element: element.similarity)
+            
+            # Format output with proper handling
+            main = f"{best.main_story} hours" if best.main_story else "N/A"
+            plus = f"{best.main_extra} hours" if best.main_extra else "N/A"
+            comp = f"{best.completionist} hours" if best.completionist else "N/A"
+            
+            return f"Main: {main} | Main+Extras: {plus} | Completionist: {comp}"
+            
+        except Exception as e:
+            # HLTB breaks often — just return None instead of throwing
+            print(f"HLTB error: {e}")
             return None
-
-        # pick best match by similarity
-        best = max(results, key=lambda r: r.similarity)
-        # Some results may not have all fields; guard with "or 0"
-        main = best.main_story or 0
-        main_extras = best.main_extra or 0
-        comp = best.completionist or 0
-
-        # Format short single line
-        return f"Main: {int(main)}h | Main+Extras: {int(main_extras)}h | Completionist: {int(comp)}h"
