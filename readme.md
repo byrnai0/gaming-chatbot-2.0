@@ -61,6 +61,7 @@ This project is currently developed as part of an academic initiative to demonst
 
 ### 3.1 High-Level Architecture
 
+'''
 User
 │
 ▼
@@ -75,10 +76,11 @@ LLM Agent (Tool-Calling with Topic Routing)
 │
 ▼
 Response Enforcement Layer → Pydantic Model → Final Output
-
+'''
 
 ### 3.2 Codebase Structure
 
+'''
 backend/
 │
 ├── main.py # Agent, tools, system prompt, Pydantic model, enforcement
@@ -97,7 +99,7 @@ backend/
 │ └── response_formatter.py # Converts model output to user-friendly text
 │
 └── init.py
-
+'''
 
 ---
 
